@@ -1,0 +1,371 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# Let's build GPT: from scratch, in code, spelled out… but with Axon
+
+```elixir
+Mix.install(
+  [
+    {:nx, "~> 0.5.3"},
+    {:kino_bumblebee, "~> 0.3.0"},
+    {:exla, "~> 0.5.1"},
+    {:table_rex, "~> 3.1.1"}
+  ],
+  config: [nx: [default_backend: EXLA.Backend]]
+)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Intro
+
+Resources:
+
+* https://www.youtube.com/watch?v=kCc8FmEb1nY
+* https://colab.research.google.com/drive/1JMLa53HDuA-i7ZBmqV7ZnA3c_fvtXnx-?usp=sharing#scrollTo=wJpXpmjEYC_T
+* https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd
+
+## Prepare the data
+
+```elixir
+text =
+  __DIR__
+  |> Path.join("input.txt")
+  |> Path.expand()
+  |> File.read!()
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"First Citizen:\nBefore we proceed any further, hear me speak.\n\nAll:\nSpeak, speak.\n\nFirst Citizen:\nYou are all resolved rather to die than to famish?\n\nAll:\nResolved. resolved.\n\nFirst Citizen:\nFirst, you know Caius Marcius is chief enemy to the people.\n\nAll:\nWe know't, we know't.\n\nFirst Citizen:\nLet us kill him, and we'll have corn at our own price.\nIs't a verdict?\n\nAll:\nNo more talking on't; let it be done: away, away!\n\nSecond Citizen:\nOne word, good citizens.\n\nFirst Citizen:\nWe are accounted poor citizens, the patricians good.\nWhat authority surfeits on would relieve us: if they\nwould yield us but the superfluity, while it were\nwholesome, we might guess they relieved us humanely;\nbut they think we are too dear: the leanness that\nafflicts us, the object of our misery, is as an\ninventory to particularise their abundance; our\nsufferance is a gain to them Let us revenge this with\nour pikes, ere we become rakes: for the gods know I\nspeak this in hunger for bread, not in thirst for revenge.\n\nSecond Citizen:\nWould you proceed especially against Caius Marcius?\n\nAll:\nAgainst him first: he's a very dog to the commonalty.\n\nSecond Citizen:\nConsider you what services he has done for his country?\n\nFirst Citizen:\nVery well; and could be content to give him good\nreport fort, but that he pays himself with being proud.\n\nSecond Citizen:\nNay, but speak not maliciously.\n\nFirst Citizen:\nI say unto you, what he hath done famously, he did\nit to that end: though soft-conscienced men can be\ncontent to say it was for his country he did it to\nplease his mother and to be partly proud; which he\nis, even till the altitude of his virtue.\n\nSecond Citizen:\nWhat he cannot help in his nature, you account a\nvice in him. You must in no way say he is covetous.\n\nFirst Citizen:\nIf I must not, I need not be barren of accusations;\nhe hath faults, with surplus, to tire in repetition.\nWhat shouts are these? The other side o' the city\nis risen: why stay we prating here? to the Capitol!\n\nAll:\nCome, come.\n\nFirst Citizen:\nSoft! who comes here?\n\nSecond Citizen:\nWorthy Menenius Agrippa; one that hath always loved\nthe people.\n\nFirst Citizen:\nHe's one honest enough: would all the rest were so!\n\nMENENIUS:\nWhat work's, my countrymen, in hand? where go you\nWith bats and clubs? The matter? speak, I pray you.\n\nFirst Citizen:\nOur business is not unknown to the senate; they have\nhad inkling this fortnight what we intend to do,\nwhich now we'll show 'em in deeds. They say poor\nsuitors have strong breaths: they shall know we\nhave strong arms too.\n\nMENENIUS:\nWhy, masters, my good friends, mine honest neighbours,\nWill you undo yourselves?\n\nFirst Citizen:\nWe cannot, sir, we are undone already.\n\nMENENIUS:\nI tell you, friends, most charitable care\nHave the patricians of you. For your wants,\nYour suffering in this dearth, you may as well\nStrike at the heaven with your staves as lift them\nAgainst the Roman state, whose course will on\nThe way it takes, cracking ten thousand curbs\nOf more strong link asunder than can ever\nAppear in your impediment. For the dearth,\nThe gods, not the patricians, make it, and\nYour knees to them, not arms, must help. Alack,\nYou are transported by calamity\nThither where more attends you, and you slander\nThe helms o' the state, who care for you like fathers,\nWhen you curse them as enemies.\n\nFirst Citizen:\nCare for us! True, indeed! They ne'er cared for us\nyet: suffer us to famish, and their store-houses\ncrammed with grain; make edicts for usury, to\nsupport usurers; repeal daily any wholesome act\nestablished against the rich, and provide more\npiercing statutes daily, to chain up and restrain\nthe poor. If the wars eat us not up, they will; and\nthere's all the love they bear us.\n\nMENENIUS:\nEither you must\nConfess yourselves wondrous malicious,\nOr be accused of folly. I shall tell you\nA pretty tale: it may be you have heard it;\nBut, since it serves my purpose, I will venture\nTo stale 't a little more.\n\nFirst Citizen:\nWell, I'll hear it, sir: yet you must not think to\nfob off our disgrace with a tale: but, an 't please\nyou, deliver.\n\nMENENIUS:\nThere was a time when all " <> ...
+```
+
+### Our Vocabulary
+
+```elixir
+chars =
+  text
+  |> String.codepoints()
+  |> Enum.uniq()
+  |> Enum.sort()
+
+vocab_size = length(chars)
+
+IO.inspect(Enum.join(chars), label: "chars")
+IO.inspect(vocab_size, label: "vocab_size")
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+chars: "\n !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+vocab_size: 65
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Basic Encoder / Decoder
+
+We are going to develop some strategy to tokenize the input text: convert the raw text to some sequence of integers according to some vocabolary of possible elements.
+
+In this case we are going to tokenize single chars: for each char there is a corresponding integer.
+
+```elixir
+defmodule Minidecoder do
+  @text __DIR__
+        |> Path.join("input.txt")
+        |> Path.expand()
+        |> File.read!()
+
+  @chars String.codepoints(@text) |> Enum.uniq() |> Enum.sort()
+
+  # string-to-integer
+  @stoi Enum.reduce(@chars, %{}, fn ch, acc -> Map.put(acc, ch, Enum.count(acc)) end)
+
+  # integer-to-string
+  @itos Enum.reduce(@stoi, %{}, fn {ch, i}, acc -> Map.put(acc, i, ch) end)
+
+  def vocab_size, do: length(@chars)
+
+  def encode_char(char), do: @stoi[char]
+
+  def decode_char(encoded_char), do: @itos[encoded_char]
+
+  def encode(text) do
+    text |> String.codepoints() |> Enum.map(&encode_char(&1))
+  end
+
+  def decode(encoded_list) do
+    encoded_list |> Enum.map(&decode_char(&1)) |> Enum.join()
+  end
+
+  def tensor(text, opts \\ []) do
+    Nx.tensor(encode(text), opts)
+  end
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:module, Minidecoder, <<70, 79, 82, 49, 0, 0, 16, ...>>, {:tensor, 2}}
+```
+
+```elixir
+vocab_size =
+  Minidecoder.vocab_size()
+  |> IO.inspect(label: "vocab size is")
+
+Minidecoder.encode("hii there") |> IO.inspect(label: "Encoding")
+Minidecoder.encode("hii there") |> Minidecoder.decode() |> IO.inspect(label: "Decoding")
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+vocab size is: 65
+Encoding: [46, 47, 47, 1, 58, 46, 43, 56, 43]
+Decoding: "hii there"
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+```elixir
+data = Minidecoder.tensor(text, type: :s64)
+
+Nx.shape(data) |> IO.inspect(label: "shape")
+data[0..999] |> IO.inspect(label: "first 1000 chars")
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+shape: {1115394}
+first 1000 chars: #Nx.Tensor<
+  s64[1000]
+  EXLA.Backend<host:0, 0.3582659003.744620048.186213>
+  [18, 47, 56, 57, 58, 1, 15, 47, 58, 47, 64, 43, 52, 10, 0, 14, 43, 44, 53, 56, 43, 1, 61, 43, 1, 54, 56, 53, 41, 43, 43, 42, 1, 39, 52, 63, 1, 44, 59, 56, 58, 46, 43, 56, 6, 1, 46, 43, 39, 56, ...]
+>
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+### Separate dataset in train and validate dataset
+
+```elixir
+# Use the 90% of the data for training and the remaining for the validation
+n = Kernel.round(Nx.size(data) * 0.9)
+
+train_data = data[0..(n - 1)//1]
+val_data = data[n..-1//1]
+
+{train_data, val_data}
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{#Nx.Tensor<
+   s64[1003855]
+   EXLA.Backend<host:0, 0.3582659003.744620048.186221>
+   [18, 47, 56, 57, 58, 1, 15, 47, 58, 47, 64, 43, 52, 10, 0, 14, 43, 44, 53, 56, 43, 1, 61, 43, 1, 54, 56, 53, 41, 43, 43, 42, 1, 39, 52, 63, 1, 44, 59, 56, 58, 46, 43, 56, 6, 1, 46, 43, 39, ...]
+ >,
+ #Nx.Tensor<
+   s64[111539]
+   EXLA.Backend<host:0, 0.3582659003.744620048.186222>
+   [0, 0, 19, 30, 17, 25, 21, 27, 10, 0, 19, 53, 53, 42, 1, 51, 53, 56, 56, 53, 61, 6, 1, 52, 43, 47, 45, 46, 40, 53, 59, 56, 1, 14, 39, 54, 58, 47, 57, 58, 39, 8, 0, 0, 14, 13, 28, 32, ...]
+ >}
+```
+
+## Data loader: batches of chunk of data
+
+To train the transform with split the train dataset in different chunks to speed it up.
+
+```elixir
+block_size = 8
+
+# Please note that the range `[0..block_size]` is equivalent to `[:block_size+1]` in pyhton
+chunk = train_data[0..block_size]
+
+IO.inspect(chunk, label: "chunk")
+
+# In a chunk of 9 chars, there are 8 individual example packed in there:
+# 18 -> 47
+# 18, 47 -> 56
+# 18, 47, 56 -> 57
+# …
+
+x = train_data[0..(block_size - 1)]
+y = train_data[1..block_size]
+
+for t <- 0..(block_size - 1) do
+  context = x[0..t] |> Nx.to_list() |> Enum.join(", ")
+  target = y[t] |> Nx.to_number()
+  IO.inspect("when input is [#{context}] the target is: #{target}")
+end
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+chunk: #Nx.Tensor<
+  s64[9]
+  EXLA.Backend<host:0, 0.3582659003.744620048.187200>
+  [18, 47, 56, 57, 58, 1, 15, 47, 58]
+>
+"when input is [18] the target is: 47"
+"when input is [18, 47] the target is: 56"
+"when input is [18, 47, 56] the target is: 57"
+"when input is [18, 47, 56, 57] the target is: 58"
+"when input is [18, 47, 56, 57, 58] the target is: 1"
+"when input is [18, 47, 56, 57, 58, 1] the target is: 15"
+"when input is [18, 47, 56, 57, 58, 1, 15] the target is: 47"
+"when input is [18, 47, 56, 57, 58, 1, 15, 47] the target is: 58"
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+### Chunks Generation
+
+```elixir
+seed = 1337
+# how many independent sequences will we process in parallel?
+batch_size = 4
+# what is the maximum context length for predictions?
+block_size = 8
+
+get_batch = fn split ->
+  key = Nx.Random.key(seed)
+
+  data = if split == "train", do: train_data, else: val_data
+
+  {ix, _new_key} =
+    Nx.Random.randint(key, 0, Nx.size(data) - block_size, shape: {batch_size}, type: :u32)
+
+  ix = Nx.to_list(ix)
+
+  x = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
+  y = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
+
+  {x, y}
+end
+
+{xb, yb} = get_batch.("train")
+
+IO.inspect("INPUTS")
+IO.inspect(Nx.shape(xb))
+IO.inspect(xb)
+IO.inspect("TARGETS")
+IO.inspect(Nx.shape(yb))
+IO.inspect(yb)
+
+IO.inspect("--------------")
+
+# batch dimension
+for b <- 0..(batch_size - 1) do
+  # time dimension
+  for t <- 0..(block_size - 1) do
+    context = xb[[b, 0..t]] |> Nx.to_list() |> Enum.join(", ")
+    target = yb[[b, t]] |> Nx.to_number()
+    IO.inspect("when input is [#{context}] the target is: #{target}")
+  end
+end
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"INPUTS"
+{4, 8}
+#Nx.Tensor<
+  s64[4][8]
+  EXLA.Backend<host:0, 0.3582659003.744620048.194221>
+  [
+    [46, 47, 51, 57, 43, 50, 44, 1],
+    [26, 19, 1, 30, 21, 15, 20, 13],
+    [41, 43, 42, 1, 39, 1, 58, 56],
+    [1, 42, 53, 1, 46, 43, 56, 43]
+  ]
+>
+"TARGETS"
+{4, 8}
+#Nx.Tensor<
+  s64[4][8]
+  EXLA.Backend<host:0, 0.3582659003.744620048.194230>
+  [
+    [47, 51, 57, 43, 50, 44, 1, 40],
+    [19, 1, 30, 21, 15, 20, 13, 30],
+    [43, 42, 1, 39, 1, 58, 56, 39],
+    [42, 53, 1, 46, 43, 56, 43, 6]
+  ]
+>
+"--------------"
+"when input is [46] the target is: 47"
+"when input is [46, 47] the target is: 51"
+"when input is [46, 47, 51] the target is: 57"
+"when input is [46, 47, 51, 57] the target is: 43"
+"when input is [46, 47, 51, 57, 43] the target is: 50"
+"when input is [46, 47, 51, 57, 43, 50] the target is: 44"
+"when input is [46, 47, 51, 57, 43, 50, 44] the target is: 1"
+"when input is [46, 47, 51, 57, 43, 50, 44, 1] the target is: 40"
+"when input is [26] the target is: 19"
+"when input is [26, 19] the target is: 1"
+"when input is [26, 19, 1] the target is: 30"
+"when input is [26, 19, 1, 30] the target is: 21"
+"when input is [26, 19, 1, 30, 21] the target is: 15"
+"when input is [26, 19, 1, 30, 21, 15] the target is: 20"
+"when input is [26, 19, 1, 30, 21, 15, 20] the target is: 13"
+"when input is [26, 19, 1, 30, 21, 15, 20, 13] the target is: 30"
+"when input is [41] the target is: 43"
+"when input is [41, 43] the target is: 42"
+"when input is [41, 43, 42] the target is: 1"
+"when input is [41, 43, 42, 1] the target is: 39"
+"when input is [41, 43, 42, 1, 39] the target is: 1"
+"when input is [41, 43, 42, 1, 39, 1] the target is: 58"
+"when input is [41, 43, 42, 1, 39, 1, 58] the target is: 56"
+"when input is [41, 43, 42, 1, 39, 1, 58, 56] the target is: 39"
+"when input is [1] the target is: 42"
+"when input is [1, 42] the target is: 53"
+"when input is [1, 42, 53] the target is: 1"
+"when input is [1, 42, 53, 1] the target is: 46"
+"when input is [1, 42, 53, 1, 46] the target is: 43"
+"when input is [1, 42, 53, 1, 46, 43] the target is: 56"
+"when input is [1, 42, 53, 1, 46, 43, 56] the target is: 43"
+"when input is [1, 42, 53, 1, 46, 43, 56, 43] the target is: 6"
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
