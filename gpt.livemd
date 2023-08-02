@@ -265,7 +265,7 @@ block_size = 8
 get_batch = fn split ->
   key = Nx.Random.key(seed)
 
-  data = if split == "train", do: train_data, else: val_data
+  data = if split == :train, do: train_data, else: val_data
 
   {ix, _new_key} =
     Nx.Random.randint(key, 0, Nx.size(data) - block_size, shape: {batch_size}, type: :u32)
@@ -278,7 +278,7 @@ get_batch = fn split ->
   {x, y}
 end
 
-{xb, yb} = get_batch.("train")
+{xb, yb} = get_batch.(:train)
 
 IO.inspect("INPUTS")
 IO.inspect(Nx.shape(xb))
@@ -309,7 +309,7 @@ end
 {4, 8}
 #Nx.Tensor<
   s64[4][8]
-  EXLA.Backend<host:0, 0.3582659003.744620048.194221>
+  EXLA.Backend<host:0, 0.3582659003.744620048.194884>
   [
     [46, 47, 51, 57, 43, 50, 44, 1],
     [26, 19, 1, 30, 21, 15, 20, 13],
@@ -321,7 +321,7 @@ end
 {4, 8}
 #Nx.Tensor<
   s64[4][8]
-  EXLA.Backend<host:0, 0.3582659003.744620048.194230>
+  EXLA.Backend<host:0, 0.3582659003.744620048.194893>
   [
     [47, 51, 57, 43, 50, 44, 1, 40],
     [19, 1, 30, 21, 15, 20, 13, 30],
@@ -368,4 +368,145 @@ end
 
 ```
 :ok
+```
+
+```elixir
+# Our input to the transformer
+
+IO.inspect(xb)
+
+:ok
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Nx.Tensor<
+  s64[4][8]
+  EXLA.Backend<host:0, 0.3582659003.744620048.194884>
+  [
+    [46, 47, 51, 57, 43, 50, 44, 1],
+    [26, 19, 1, 30, 21, 15, 20, 13],
+    [41, 43, 42, 1, 39, 1, 58, 56],
+    [1, 42, 53, 1, 46, 43, 56, 43]
+  ]
+>
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+## Bigram Language Model
+
+```elixir
+# Hyperparameters
+batch_size = 4
+block_size = 8
+
+bigram_model =
+  Axon.input("sequence")
+  |> Axon.embedding(65, 65)
+
+Axon.Display.as_graph(bigram_model, Nx.template({batch_size, block_size}, :f32),
+  direction: :top_down
+)
+```
+
+<!-- livebook:{"output":true} -->
+
+```mermaid
+graph TD;
+3[/"sequence (:input) {4, 8}"/];
+4["embedding_0 (:embedding) {4, 8, 65}"];
+3 --> 4;
+```
+
+```elixir
+get_batch_stream = fn batch_size, block_size, split ->
+  Stream.resource(
+    # initialization function
+    fn ->
+      Nx.Random.key(seed)
+    end,
+    # generation function
+    fn key ->
+      data = if(split == :train, do: train_data, else: val_data)
+
+      {ix, new_key} =
+        Nx.Random.randint(key, 0, Nx.size(data) - block_size, shape: {batch_size}, type: :u32)
+
+      ix = Nx.to_list(ix)
+
+      x = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
+      y = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
+
+      # Reshape yb {b, t}, to be a single vector
+      # We do this to match the shape of y_true during training
+      # https://hexdocs.pm/axon/Axon.Losses.html#categorical_cross_entropy/3
+      {b, t} = Nx.shape(y)
+
+      # or Nx.flatten
+      flattened_y = Nx.reshape(y, {b * t})
+
+      out_data = {x, flattened_y}
+
+      {[out_data], new_key}
+    end,
+    # termination function
+    fn _ -> :ok end
+  )
+end
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Function<40.3316493/3 in :erl_eval.expr/6>
+```
+
+```elixir
+# We'll use this for other models further along in the notebook
+defmodule CommonTrain do
+  import Nx.Defn
+
+  defn custom_predict_fn(model_predict_fn, params, input) do
+    %{prediction: preds} = out = model_predict_fn.(params, input)
+    {b, t, c} = Nx.shape(preds)
+    reshaped = Nx.reshape(preds, {b * t, c})
+    %{out | prediction: reshaped}
+  end
+
+  def custom_loss_fn(y_true, y_pred) do
+    y_true = Nx.reshape(y_true, {:auto, 1})
+
+    Axon.Losses.categorical_cross_entropy(y_true, y_pred,
+      from_logits: true,
+      sparse: true,
+      reduction: :mean
+    )
+  end
+end
+
+{init_fn, predict_fn} = Axon.build(bigram_model, mode: :train)
+custom_predict_fn = &CommonTrain.custom_predict_fn(predict_fn, &1, &2)
+custom_loss_fn = &CommonTrain.custom_loss_fn(&1, &2)
+
+# {xb, yb} = get_batch.(:train)
+train_batch_stream = get_batch_stream.(4, 8, :train)
+
+params =
+  {init_fn, custom_predict_fn}
+  |> Axon.Loop.trainer(custom_loss_fn, Axon.Optimizers.adamw())
+  |> Axon.Loop.run(train_batch_stream, %{}, epochs: 1, iterations: 10000, compiler: EXLA)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+
+09:56:29.867 [debug] Forwarding options: [compiler: EXLA] to JIT compiler
+Epoch: 0, Batch: 400, loss: 4.0416088
 ```
