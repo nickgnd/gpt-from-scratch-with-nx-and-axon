@@ -1,5 +1,3 @@
-<!-- livebook:{"persist_outputs":true} -->
-
 # Let's build GPT: from scratch, in code, spelled out… but with Axon
 
 ```elixir
@@ -12,12 +10,6 @@ Mix.install(
   ],
   config: [nx: [default_backend: EXLA.Backend]]
 )
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-:ok
 ```
 
 ## Intro
@@ -38,12 +30,6 @@ text =
   |> File.read!()
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-"First Citizen:\nBefore we proceed any further, hear me speak.\n\nAll:\nSpeak, speak.\n\nFirst Citizen:\nYou are all resolved rather to die than to famish?\n\nAll:\nResolved. resolved.\n\nFirst Citizen:\nFirst, you know Caius Marcius is chief enemy to the people.\n\nAll:\nWe know't, we know't.\n\nFirst Citizen:\nLet us kill him, and we'll have corn at our own price.\nIs't a verdict?\n\nAll:\nNo more talking on't; let it be done: away, away!\n\nSecond Citizen:\nOne word, good citizens.\n\nFirst Citizen:\nWe are accounted poor citizens, the patricians good.\nWhat authority surfeits on would relieve us: if they\nwould yield us but the superfluity, while it were\nwholesome, we might guess they relieved us humanely;\nbut they think we are too dear: the leanness that\nafflicts us, the object of our misery, is as an\ninventory to particularise their abundance; our\nsufferance is a gain to them Let us revenge this with\nour pikes, ere we become rakes: for the gods know I\nspeak this in hunger for bread, not in thirst for revenge.\n\nSecond Citizen:\nWould you proceed especially against Caius Marcius?\n\nAll:\nAgainst him first: he's a very dog to the commonalty.\n\nSecond Citizen:\nConsider you what services he has done for his country?\n\nFirst Citizen:\nVery well; and could be content to give him good\nreport fort, but that he pays himself with being proud.\n\nSecond Citizen:\nNay, but speak not maliciously.\n\nFirst Citizen:\nI say unto you, what he hath done famously, he did\nit to that end: though soft-conscienced men can be\ncontent to say it was for his country he did it to\nplease his mother and to be partly proud; which he\nis, even till the altitude of his virtue.\n\nSecond Citizen:\nWhat he cannot help in his nature, you account a\nvice in him. You must in no way say he is covetous.\n\nFirst Citizen:\nIf I must not, I need not be barren of accusations;\nhe hath faults, with surplus, to tire in repetition.\nWhat shouts are these? The other side o' the city\nis risen: why stay we prating here? to the Capitol!\n\nAll:\nCome, come.\n\nFirst Citizen:\nSoft! who comes here?\n\nSecond Citizen:\nWorthy Menenius Agrippa; one that hath always loved\nthe people.\n\nFirst Citizen:\nHe's one honest enough: would all the rest were so!\n\nMENENIUS:\nWhat work's, my countrymen, in hand? where go you\nWith bats and clubs? The matter? speak, I pray you.\n\nFirst Citizen:\nOur business is not unknown to the senate; they have\nhad inkling this fortnight what we intend to do,\nwhich now we'll show 'em in deeds. They say poor\nsuitors have strong breaths: they shall know we\nhave strong arms too.\n\nMENENIUS:\nWhy, masters, my good friends, mine honest neighbours,\nWill you undo yourselves?\n\nFirst Citizen:\nWe cannot, sir, we are undone already.\n\nMENENIUS:\nI tell you, friends, most charitable care\nHave the patricians of you. For your wants,\nYour suffering in this dearth, you may as well\nStrike at the heaven with your staves as lift them\nAgainst the Roman state, whose course will on\nThe way it takes, cracking ten thousand curbs\nOf more strong link asunder than can ever\nAppear in your impediment. For the dearth,\nThe gods, not the patricians, make it, and\nYour knees to them, not arms, must help. Alack,\nYou are transported by calamity\nThither where more attends you, and you slander\nThe helms o' the state, who care for you like fathers,\nWhen you curse them as enemies.\n\nFirst Citizen:\nCare for us! True, indeed! They ne'er cared for us\nyet: suffer us to famish, and their store-houses\ncrammed with grain; make edicts for usury, to\nsupport usurers; repeal daily any wholesome act\nestablished against the rich, and provide more\npiercing statutes daily, to chain up and restrain\nthe poor. If the wars eat us not up, they will; and\nthere's all the love they bear us.\n\nMENENIUS:\nEither you must\nConfess yourselves wondrous malicious,\nOr be accused of folly. I shall tell you\nA pretty tale: it may be you have heard it;\nBut, since it serves my purpose, I will venture\nTo stale 't a little more.\n\nFirst Citizen:\nWell, I'll hear it, sir: yet you must not think to\nfob off our disgrace with a tale: but, an 't please\nyou, deliver.\n\nMENENIUS:\nThere was a time when all " <> ...
-```
-
 ### Our Vocabulary
 
 ```elixir
@@ -58,19 +44,6 @@ vocab_size = length(chars)
 IO.inspect(Enum.join(chars), label: "chars")
 IO.inspect(vocab_size, label: "vocab_size")
 
-:ok
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-chars: "\n !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-vocab_size: 65
-```
-
-<!-- livebook:{"output":true} -->
-
-```
 :ok
 ```
 
@@ -115,12 +88,6 @@ defmodule Minidecoder do
 end
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-{:module, Minidecoder, <<70, 79, 82, 49, 0, 0, 16, ...>>, {:tensor, 2}}
-```
-
 ```elixir
 vocab_size =
   Minidecoder.vocab_size()
@@ -132,45 +99,12 @@ Minidecoder.encode("hii there") |> Minidecoder.decode() |> IO.inspect(label: "De
 :ok
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-vocab size is: 65
-Encoding: [46, 47, 47, 1, 58, 46, 43, 56, 43]
-Decoding: "hii there"
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-:ok
-```
-
 ```elixir
 data = Minidecoder.tensor(text, type: :s64)
 
 Nx.shape(data) |> IO.inspect(label: "shape")
 data[0..999] |> IO.inspect(label: "first 1000 chars")
 
-:ok
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-shape: {1115394}
-
-00:10:36.824 [info] TfrtCpuClient created.
-first 1000 chars: #Nx.Tensor<
-  s64[1000]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.125662>
-  [18, 47, 56, 57, 58, 1, 15, 47, 58, 47, 64, 43, 52, 10, 0, 14, 43, 44, 53, 56, 43, 1, 61, 43, 1, 54, 56, 53, 41, 43, 43, 42, 1, 39, 52, 63, 1, 44, 59, 56, 58, 46, 43, 56, 6, 1, 46, 43, 39, 56, ...]
->
-```
-
-<!-- livebook:{"output":true} -->
-
-```
 :ok
 ```
 
@@ -184,21 +118,6 @@ train_data = data[0..(n - 1)//1]
 val_data = data[n..-1//1]
 
 {train_data, val_data}
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-{#Nx.Tensor<
-   s64[1003855]
-   EXLA.Backend<host:0, 0.3367669921.1250295822.125664>
-   [18, 47, 56, 57, 58, 1, 15, 47, 58, 47, 64, 43, 52, 10, 0, 14, 43, 44, 53, 56, 43, 1, 61, 43, 1, 54, 56, 53, 41, 43, 43, 42, 1, 39, 52, 63, 1, 44, 59, 56, 58, 46, 43, 56, 6, 1, 46, 43, 39, ...]
- >,
- #Nx.Tensor<
-   s64[111539]
-   EXLA.Backend<host:0, 0.3367669921.1250295822.125666>
-   [0, 0, 19, 30, 17, 25, 21, 27, 10, 0, 19, 53, 53, 42, 1, 51, 53, 56, 56, 53, 61, 6, 1, 52, 43, 47, 45, 46, 40, 53, 59, 56, 1, 14, 39, 54, 58, 47, 57, 58, 39, 8, 0, 0, 14, 13, 28, 32, ...]
- >}
 ```
 
 ## Data loader: batches of chunk of data
@@ -231,30 +150,6 @@ end
 :ok
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-chunk: #Nx.Tensor<
-  s64[9]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.125668>
-  [18, 47, 56, 57, 58, 1, 15, 47, 58]
->
-"when input is [18] the target is: 47"
-"when input is [18, 47] the target is: 56"
-"when input is [18, 47, 56] the target is: 57"
-"when input is [18, 47, 56, 57] the target is: 58"
-"when input is [18, 47, 56, 57, 58] the target is: 1"
-"when input is [18, 47, 56, 57, 58, 1] the target is: 15"
-"when input is [18, 47, 56, 57, 58, 1, 15] the target is: 47"
-"when input is [18, 47, 56, 57, 58, 1, 15, 47] the target is: 58"
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-:ok
-```
-
 ### Chunks Generation
 
 ```elixir
@@ -269,11 +164,27 @@ get_batch = fn split ->
 
   data = if split == :train, do: train_data, else: val_data
 
+  # Generate random lists (batch size) of indices, each list will
+  # be used to "sample" the dataset and plug `x` and `y` tensor starting from
+  # each index in the list, the slice has length `block_size` (therefore it needs to be
+  # taken into account: `Nx.size(data) - block_size`).
+  #
+  # Example
+  # ix = [5, 10, 40, 60]
+  # x = [[46, 47, 51, 57, 43, 50, 44, 1], […], […], […]]
+  # y = [[47, 51, 57, 43, 50, 44, 1, 40], […], […], […]]
+  #
+  # where
+  # - x[[0, 0]] = 46 = data[5] (5 is the 1st index in the 1st list of indices)
+  # - x[[0, 1]] = 47 = data[5 + 1]
+  # - … and so on
   {ix, _new_key} =
     Nx.Random.randint(key, 0, Nx.size(data) - block_size, shape: {batch_size}, type: :u32)
 
   ix = Nx.to_list(ix)
 
+  # From each index in `ix`, slice the data and extract
+  # a 1d tensor of size `block_size`, then stack them all together
   x = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
   y = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
 
@@ -304,100 +215,11 @@ end
 :ok
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-"INPUTS"
-{4, 8}
-#Nx.Tensor<
-  s64[4][8]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.126299>
-  [
-    [46, 47, 51, 57, 43, 50, 44, 1],
-    [26, 19, 1, 30, 21, 15, 20, 13],
-    [41, 43, 42, 1, 39, 1, 58, 56],
-    [1, 42, 53, 1, 46, 43, 56, 43]
-  ]
->
-"TARGETS"
-{4, 8}
-#Nx.Tensor<
-  s64[4][8]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.126312>
-  [
-    [47, 51, 57, 43, 50, 44, 1, 40],
-    [19, 1, 30, 21, 15, 20, 13, 30],
-    [43, 42, 1, 39, 1, 58, 56, 39],
-    [42, 53, 1, 46, 43, 56, 43, 6]
-  ]
->
-"--------------"
-"when input is [46] the target is: 47"
-"when input is [46, 47] the target is: 51"
-"when input is [46, 47, 51] the target is: 57"
-"when input is [46, 47, 51, 57] the target is: 43"
-"when input is [46, 47, 51, 57, 43] the target is: 50"
-"when input is [46, 47, 51, 57, 43, 50] the target is: 44"
-"when input is [46, 47, 51, 57, 43, 50, 44] the target is: 1"
-"when input is [46, 47, 51, 57, 43, 50, 44, 1] the target is: 40"
-"when input is [26] the target is: 19"
-"when input is [26, 19] the target is: 1"
-"when input is [26, 19, 1] the target is: 30"
-"when input is [26, 19, 1, 30] the target is: 21"
-"when input is [26, 19, 1, 30, 21] the target is: 15"
-"when input is [26, 19, 1, 30, 21, 15] the target is: 20"
-"when input is [26, 19, 1, 30, 21, 15, 20] the target is: 13"
-"when input is [26, 19, 1, 30, 21, 15, 20, 13] the target is: 30"
-"when input is [41] the target is: 43"
-"when input is [41, 43] the target is: 42"
-"when input is [41, 43, 42] the target is: 1"
-"when input is [41, 43, 42, 1] the target is: 39"
-"when input is [41, 43, 42, 1, 39] the target is: 1"
-"when input is [41, 43, 42, 1, 39, 1] the target is: 58"
-"when input is [41, 43, 42, 1, 39, 1, 58] the target is: 56"
-"when input is [41, 43, 42, 1, 39, 1, 58, 56] the target is: 39"
-"when input is [1] the target is: 42"
-"when input is [1, 42] the target is: 53"
-"when input is [1, 42, 53] the target is: 1"
-"when input is [1, 42, 53, 1] the target is: 46"
-"when input is [1, 42, 53, 1, 46] the target is: 43"
-"when input is [1, 42, 53, 1, 46, 43] the target is: 56"
-"when input is [1, 42, 53, 1, 46, 43, 56] the target is: 43"
-"when input is [1, 42, 53, 1, 46, 43, 56, 43] the target is: 6"
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-:ok
-```
-
 ```elixir
 # Our input to the transformer
 
 IO.inspect(xb)
 
-:ok
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-#Nx.Tensor<
-  s64[4][8]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.126299>
-  [
-    [46, 47, 51, 57, 43, 50, 44, 1],
-    [26, 19, 1, 30, 21, 15, 20, 13],
-    [41, 43, 42, 1, 39, 1, 58, 56],
-    [1, 42, 53, 1, 46, 43, 56, 43]
-  ]
->
-```
-
-<!-- livebook:{"output":true} -->
-
-```
 :ok
 ```
 
@@ -431,12 +253,6 @@ bigram_model =
 Axon.Display.as_graph(bigram_model, Nx.template({batch_size, block_size}, :f32),
   direction: :top_down
 )
-```
-
-<!-- livebook:{"output":true} -->
-
-```mermaid
-null
 ```
 
 ```elixir
@@ -502,76 +318,6 @@ IO.inspect(-:math.log(1 / 65), label: "expected loss")
 :ok
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-predictions: #Nx.Tensor<
-  f32[4][8][65]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.127066>
-  [
-    [
-      [0.009918920695781708, -0.008788799867033958, 0.004803226329386234, 0.0014841416850686073, -0.009281542152166367, -0.005084702745079994, -0.008208155632019043, -0.004911172203719616, -4.2134057730436325e-4, -0.006824581418186426, 0.001183914951980114, 6.13694079220295e-4, 0.008082643151283264, 0.006049990653991699, -0.009796619415283203, 0.009515203535556793, -0.009363023564219475, -0.0031307125464081764, 0.0016116788610816002, 0.00458679161965847, -0.007854683324694633, -0.0064759706147015095, -0.009435150772333145, -0.002914805430918932, 0.0033491868525743484, -0.0028693554922938347, 0.0016466407105326653, -0.008713352493941784, -0.008092996664345264, 0.006136605516076088, 0.003976022824645042, -0.002838051412254572, -0.005974471569061279, -0.006304421462118626, 0.005016019567847252, 0.0056952740997076035, -0.0025387476198375225, -0.0069467113353312016, 0.00114427600055933, 0.0036191483959555626, 0.006998810917139053, -0.0026831268332898617, 0.004738194867968559, 0.0042861392721533775, 0.002205371856689453, -0.004895365331321955, -0.003496138844639063, 0.00491112656891346, -0.007927462458610535, -0.00689651956781745, ...],
-      ...
-    ],
-    ...
-  ]
->
-y_pred reshaped: #Nx.Tensor<
-  f32[32][65]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.127068>
-  [
-    [0.009918920695781708, -0.008788799867033958, 0.004803226329386234, 0.0014841416850686073, -0.009281542152166367, -0.005084702745079994, -0.008208155632019043, -0.004911172203719616, -4.2134057730436325e-4, -0.006824581418186426, 0.001183914951980114, 6.13694079220295e-4, 0.008082643151283264, 0.006049990653991699, -0.009796619415283203, 0.009515203535556793, -0.009363023564219475, -0.0031307125464081764, 0.0016116788610816002, 0.00458679161965847, -0.007854683324694633, -0.0064759706147015095, -0.009435150772333145, -0.002914805430918932, 0.0033491868525743484, -0.0028693554922938347, 0.0016466407105326653, -0.008713352493941784, -0.008092996664345264, 0.006136605516076088, 0.003976022824645042, -0.002838051412254572, -0.005974471569061279, -0.006304421462118626, 0.005016019567847252, 0.0056952740997076035, -0.0025387476198375225, -0.0069467113353312016, 0.00114427600055933, 0.0036191483959555626, 0.006998810917139053, -0.0026831268332898617, 0.004738194867968559, 0.0042861392721533775, 0.002205371856689453, -0.004895365331321955, -0.003496138844639063, 0.00491112656891346, -0.007927462458610535, -0.00689651956781745, ...],
-    ...
-  ]
->
-y_true reshaped: #Nx.Tensor<
-  s64[32][1]
-  EXLA.Backend<host:0, 0.3367669921.1250295822.127070>
-  [
-    [47],
-    [51],
-    [57],
-    [43],
-    [50],
-    [44],
-    [1],
-    [40],
-    [19],
-    [1],
-    [30],
-    [21],
-    [15],
-    [20],
-    [13],
-    [30],
-    [43],
-    [42],
-    [1],
-    [39],
-    [1],
-    [58],
-    [56],
-    [39],
-    [42],
-    [53],
-    [1],
-    [46],
-    [43],
-    [56],
-    [43],
-    [6]
-  ]
->
-loss: 4.17564582824707
-expected loss: 4.174387269895637
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-:ok
-```
-
 ## Generating text with the bigram model
 
 The `generate` function takes the same inputs which represent the current context of some chars in a batch. The job of the `generate` is to take a `{B, T}` and extend it to be `{B, T + 1}`, `{B, T + 2}` and so on. Basically to continue the generation in all the batch dimension in the time dimension.
@@ -581,6 +327,8 @@ The `generate` function takes the same inputs which represent the current contex
 # for convenience and add the `generate` function
 
 defmodule BigramLanguageModel do
+  import Nx.Defn
+
   def init(vocab_size) do
     # vocab_size = embedding_size
     Axon.input("sequence")
@@ -596,21 +344,28 @@ defmodule BigramLanguageModel do
     if targets == :none do
       {preds, nil}
     else
+      # Compute it twice for the sake of keep it simple
       {b, t, c} = Nx.shape(preds)
-
-      # `y_pred` are the `logits` in the video
       y_pred = Nx.reshape(preds, {b * t, c})
-      y_true = Nx.reshape(targets, {:auto, 1})
 
-      loss =
-        Axon.Losses.categorical_cross_entropy(y_true, y_pred,
-          from_logits: true,
-          sparse: true,
-          reduction: :mean
-        )
+      loss = loss(targets, preds)
 
       {y_pred, loss}
     end
+  end
+
+  defn loss(targets, preds) do
+    {b, t, c} = Nx.shape(preds)
+
+    # `y_pred` are the `logits` in the video
+    y_pred = Nx.reshape(preds, {b * t, c})
+    y_true = Nx.reshape(targets, {:auto, 1})
+
+    Axon.Losses.categorical_cross_entropy(y_true, y_pred,
+      from_logits: true,
+      sparse: true,
+      reduction: :mean
+    )
   end
 
   def generate(model, idx, max_new_tokens) do
@@ -645,12 +400,6 @@ defmodule BigramLanguageModel do
     end
   end
 end
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-{:module, BigramLanguageModel, <<70, 79, 82, 49, 0, 0, 16, ...>>, {:generate, 3}}
 ```
 
 📌 Note that `Nx.argmax/2` is used in the last step of the `BigramLanguageModel.generate/3` function because I couldn't find the equivalent of `torch.multinomial` in `Nx`.
@@ -689,26 +438,112 @@ BigramLanguageModel.generate(model, idx, max_new_tokens)
 |> List.first()
 ```
 
-<!-- livebook:{"output":true} -->
-
-```
-logits shape: {32, 65}
-loss: #Nx.Tensor<
-  f32
-  EXLA.Backend<host:0, 0.3367669921.1250557966.234903>
-  4.173995018005371
->
-```
-
-<!-- livebook:{"output":true} -->
-
-```
-"auXPbWKsPmaMacxRQQKcT$psFE ni,Yn?DSkZmnfEXcrHU&bKealWcKxRDf'-aZlWqdKwNiRHfhKL-vLX$:Pm,hy$-Faa!CjL.PO"
-```
-
 👆 At the moment the returned sequence is useless 🗑️
 
 This because:
 
 * the model is "random" and not trained
 * the `generate` function is written to be general: we are accumulating the context and use it to feed the model, but then when it is time to predict the next char, we only look at the last char of the context. That's because it is a simple Bigram model.
+
+## Training the Bigram Model (with Axon)
+
+Let's train the model to make it less random! But before starting we need to change the `get_batch` utility function to accept the PRNG (pseudo-random number generator) key as argument in order to get different batches all the time. This is because in `Nx.Random` is stateless (https://hexdocs.pm/nx/Nx.Random.html).
+
+```elixir
+get_batch = fn split, batch_size, block_size, pnrg_key ->
+  data = if split == :train, do: train_data, else: val_data
+
+  {ix, new_pnrg_key} =
+    Nx.Random.randint(pnrg_key, 0, Nx.size(data) - block_size, shape: {batch_size}, type: :u32)
+
+  ix = Nx.to_list(ix)
+
+  x = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
+  y = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
+
+  %{batch: {x, y}, pnrg_key: new_pnrg_key}
+end
+```
+
+```elixir
+batch_size = 32
+block_size = 8
+
+iterations = 10
+seed = 1337
+initial_pnrg_key = Nx.Random.key(seed)
+
+# GENERATING THE BATCHES IN THIS WAY IS VERY SLOW!
+# I kept the number of iterations low for that reasons
+# (to generate 500 batches it took 200 seconds)
+%{batches: train_batches} =
+  Enum.reduce(0..(iterations - 1), %{pnrg_key: initial_pnrg_key, batches: []}, fn _n, acc ->
+    %{pnrg_key: pnrg_key, batches: batches} = acc
+
+    %{batch: {xb, yb}, pnrg_key: new_pnrg_key} =
+      get_batch.(:train, batch_size, block_size, pnrg_key)
+
+    %{pnrg_key: new_pnrg_key, batches: batches ++ [{xb, yb}]}
+  end)
+
+model = BigramLanguageModel.init(vocab_size)
+lr = 1.0e-3
+optimizer = Axon.Optimizers.adamw(lr)
+
+model
+|> Axon.Loop.trainer(&BigramLanguageModel.loss/2, optimizer)
+|> Axon.Loop.run(train_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
+```
+
+👆 The batch generation is incredibly slow, it took 200 seconds to generate 500 batches. Let's try to speed it up by making it lazy 💤 and infinite.
+
+_(Kudos to @wdetw for the idea https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd 👏)_
+
+```elixir
+seed = 1337
+
+get_streamed_batch = fn split, batch_size, block_size ->
+  Stream.resource(
+    fn -> Nx.Random.key(seed) end,
+    fn pnrg_key ->
+      data = if split == :train, do: train_data, else: val_data
+
+      {ix, new_pnrg_key} =
+        Nx.Random.randint(
+          pnrg_key,
+          0,
+          Nx.size(data) - block_size,
+          shape: {batch_size},
+          type: :u32
+        )
+
+      ix = Nx.to_list(ix)
+      xb = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
+      yb = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
+
+      {[{xb, yb}], new_pnrg_key}
+    end,
+    fn _ -> :ok end
+  )
+end
+```
+
+```elixir
+batch_size = 32
+block_size = 8
+# 10_000
+iterations = 100
+
+streamed_batches = get_streamed_batch.(:train, batch_size, block_size)
+
+# Let's inspect 2 batches
+IO.inspect(Enum.take(streamed_batches, 2), label: "First 2 batches [{xb, yb}, …]")
+
+model = BigramLanguageModel.init(vocab_size)
+lr = 1.0e-3
+optimizer = Axon.Optimizers.adamw(lr)
+
+model
+|> Axon.Loop.trainer(&BigramLanguageModel.loss/2, optimizer)
+|> Axon.Loop.run(streamed_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
+```
