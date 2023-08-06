@@ -320,6 +320,87 @@ IO.inspect(-:math.log(1 / 65), label: "expected loss")
 
 ## Generating text with the bigram model
 
+### Multinomial distribution implementation
+
+Before starting we need to define the function for the multinomial distribution which will be used to generate the next char. In `nx` is not available, but it is possible to implement it using [`Nx.Random.choice/4`](https://hexdocs.pm/nx/Nx.Random.html#choice/4).
+
+👉 Many many many thanks to [@wtedw](https://github.com/wtedw/) for coming up with a nice and clean [implementation](https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd#multinomial) 👏👏👏.
+
+> Multinomial distribution models the probability of each combination of successes in a series of independent trials. Use this distribution when there are more than two possible mutually exclusive outcomes for each trial, and each outcome has a fixed probability of success.
+
+* https://it.mathworks.com/help/stats/multinomial-distribution.html
+* https://pytorch.org/docs/stable/generated/torch.multinomial.html
+
+```elixir
+# source https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd#multinomial
+
+defmodule RandomPlus do
+  import Nx.Defn
+
+  defn multinomial(init_key, input, opts \\ []) do
+    opts = keyword!(opts, num_samples: 1)
+    num_samples = opts[:num_samples]
+
+    {b, c} = Nx.shape(input)
+    # initialize the result tensor `{b, num_samples}`
+    initial_tensor = Nx.broadcast(0, {b, num_samples})
+
+    # Generate the category tensors used to compute
+    # the multinomial distribution for each row in the
+    # `input` tensor.
+    # (it will then be used as index value
+    # to fetch the char from the embiddings table)
+    #
+    # e.g. if `c` is 4: `Nx.tensor([0, 1, 2, 3])`
+    category_iota = Nx.iota({c}, type: :s32)
+
+    {_i, _input, next_key, acc} =
+      while {i = 0, input, key = init_key, acc = initial_tensor}, i < b do
+        # Let's plug one of the row from the initial inputs
+        # which will represent the probability distribution (shape `{c}`)
+        i_batch_prob = input[i]
+
+        # Generates random samples from a tensor with specified probabilities
+        # `i_batch_prob`. The returned `i_samples` is `{num_samples}`.
+        {i_samples, next_key} =
+          Nx.Random.choice(key, category_iota, i_batch_prob, samples: num_samples)
+
+        # Reshape the `i_samples` to `{1, num_samples}` and
+        # update ith row in the acc to hold the new samples
+        i_samples_reformatted = Nx.reshape(i_samples, {1, :auto})
+        acc = Nx.put_slice(acc, [i, 0], i_samples_reformatted)
+
+        {i + 1, input, next_key, acc}
+      end
+
+    {next_key, acc}
+  end
+end
+```
+
+Let's play a bit with it to understand how it works…
+
+```elixir
+probs =
+  Nx.tensor([
+    [0.2, 0.3, 0.1, 0.15, 0.25],
+    [0.10, 0.10, 0.10, 0.10, 0.60],
+    [0.0, 0.0, 0.0, 0.0, 1.00]
+  ])
+
+# Given some batched probability distribution, sample 5 values
+# This is for demonstration purposes (we'll only need to sample 1 char when generating text)
+{_key, samples} = RandomPlus.multinomial(Nx.Random.key(1337), probs, num_samples: 5)
+IO.inspect(samples, label: "Num. samples 5")
+
+{_key, samples} = RandomPlus.multinomial(Nx.Random.key(1337), probs, num_samples: 1)
+IO.inspect(samples, label: "Num. samples 1")
+
+:ok
+```
+
+### Text generation
+
 The `generate` function takes the same inputs which represent the current context of some chars in a batch. The job of the `generate` is to take a `{B, T}` and extend it to be `{B, T + 1}`, `{B, T + 2}` and so on. Basically to continue the generation in all the batch dimension in the time dimension.
 
 ```elixir
@@ -333,12 +414,10 @@ defmodule BigramLanguageModel do
     # vocab_size = embedding_size
     Axon.input("sequence")
     |> Axon.embedding(vocab_size, vocab_size)
+    |> Axon.build(mode: :train)
   end
 
-  def forward(model, idx, targets \\ :none) do
-    {init_fn, predict_fn} = Axon.build(model, mode: :train)
-
-    params = init_fn.(Nx.to_template(idx), %{})
+  def forward(predict_fn, params, idx, targets \\ :none) do
     %{prediction: preds} = predict_fn.(params, idx)
 
     if targets == :none do
@@ -368,11 +447,11 @@ defmodule BigramLanguageModel do
     )
   end
 
-  def generate(model, idx, max_new_tokens) do
-    for _n <- 0..(max_new_tokens - 1), reduce: nil do
-      acc ->
+  def generate(predict_fn, params, idx, max_new_tokens, pnrg_key) do
+    for _n <- 0..(max_new_tokens - 1), reduce: {pnrg_key, nil} do
+      {pnrg_key, acc} ->
         # get the prediction
-        {y_pred, _loss} = BigramLanguageModel.forward(model, idx)
+        {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
 
         # focus only on the last time step
         # becomes {B, C}
@@ -383,38 +462,28 @@ defmodule BigramLanguageModel do
         probs = Axon.Activations.softmax(logits)
 
         # sample from the distribution
-        # Original in python:
-        # `idx_next = torch.multinomial(probs, num_samples=1)`
-        #
-        # but `multinomial` it is not available in Nx, therfore let's use `argmax` to
-        # return the indices of the maximum values.
-        # (B, 1)
-        idx_next = Nx.argmax(probs, axis: 1, keep_axis: true)
+        # `{B, 1}`
+        {next_pnrg_key, idx_next} = RandomPlus.multinomial(pnrg_key, probs, num_samples: 1)
 
         # {B, T + 1}
         if acc != nil do
-          Nx.concatenate([acc, idx_next], axis: 1)
+          {next_pnrg_key, Nx.concatenate([acc, idx_next], axis: 1)}
         else
-          Nx.concatenate([idx_next], axis: 1)
+          {next_pnrg_key, Nx.concatenate([idx_next], axis: 1)}
         end
     end
   end
 end
 ```
 
-📌 Note that `Nx.argmax/2` is used in the last step of the `BigramLanguageModel.generate/3` function because I couldn't find the equivalent of `torch.multinomial` in `Nx`.
-I'm might be wrong, but based on my undestanding, the difference is that `torch.multinomial(probs, num_samples=1)` will return the first indices according to when each was sampled, while `Nx.argmax(probs, …)` returns the indices of the maximum value.
-
-References:
-
-* https://pytorch.org/docs/stable/generated/torch.multinomial.html
-* https://hexdocs.pm/nx/Nx.html#argmax/2
-
 ```elixir
 # Text Generation
 
-model = BigramLanguageModel.init(vocab_size)
-{logits, loss} = BigramLanguageModel.forward(model, xb, yb)
+{init_fn, predict_fn} = BigramLanguageModel.init(vocab_size)
+initial_params = init_fn.(Nx.to_template(xb), %{})
+IO.inspect(initial_params, label: "initial_params")
+
+{logits, loss} = BigramLanguageModel.forward(predict_fn, initial_params, xb, yb)
 IO.inspect(Nx.shape(logits), label: "logits shape")
 IO.inspect(loss, label: "loss")
 
@@ -429,13 +498,20 @@ idx = Nx.broadcast(Nx.tensor(0), {1, 1})
 
 max_new_tokens = 100
 
-BigramLanguageModel.generate(model, idx, max_new_tokens)
+seed = 1337
+initial_pnrg_key = Nx.Random.key(seed)
+
+{_key, encoded_result} =
+  BigramLanguageModel.generate(predict_fn, initial_params, idx, max_new_tokens, initial_pnrg_key)
+
+encoded_result
 # Convert our Nx.tensor to Elixir list
 |> Nx.to_list()
 # Decode the results
 |> Enum.map(fn encoded_list -> Minidecoder.decode(encoded_list) end)
 # We have only 1 batch, so just unplug the 1st item
 |> List.first()
+|> IO.puts()
 ```
 
 👆 At the moment the returned sequence is useless 🗑️
@@ -495,9 +571,9 @@ model
 |> Axon.Loop.run(train_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
 ```
 
-👆 The batch generation is incredibly slow, it took 200 seconds to generate 500 batches. Let's try to speed it up by making it lazy 💤 and infinite.
+👆 The batch generation is rather slow, it takes 200 seconds to generate 500 batches. Let's try to speed it up by making it lazy 💤 and infinite.
 
-_(Kudos to @wdetw for the idea https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd 👏)_
+_(Again, kudos to [@wdetw](https://github.com/wtedw) for the idea https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd 👏)_
 
 ```elixir
 seed = 1337
@@ -529,21 +605,55 @@ end
 ```
 
 ```elixir
-batch_size = 32
-block_size = 8
-# 10_000
-iterations = 100
+# Let's inspect 2 batches `[{xb, yb}, {xb, yb}]`
 
 streamed_batches = get_streamed_batch.(:train, batch_size, block_size)
+Enum.take(streamed_batches, 2)
+```
 
-# Let's inspect 2 batches
-IO.inspect(Enum.take(streamed_batches, 2), label: "First 2 batches [{xb, yb}, …]")
+```elixir
+# Hyperparams
+batch_size = 32
+block_size = 8
+# increase number of steps for good results...
+iterations = 1000
 
 model = BigramLanguageModel.init(vocab_size)
 lr = 1.0e-3
 optimizer = Axon.Optimizers.adamw(lr)
 
-model
-|> Axon.Loop.trainer(&BigramLanguageModel.loss/2, optimizer)
-|> Axon.Loop.run(streamed_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
+# Use Axon to construct the training loop
+params =
+  model
+  |> Axon.Loop.trainer(&BigramLanguageModel.loss/2, optimizer)
+  |> Axon.Loop.run(streamed_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
+```
+
+_(side note: i feel that training loop is a bit slow, but I should verify how long it takes the python implementation. With my notebook (macbook pro i7) it takes 60 seconds for 1000 iterations.)_
+
+```elixir
+# And check the loss with the params after # iterations of training loop
+
+[{xb, yb}] = get_streamed_batch.(:train, batch_size, block_size) |> Enum.take(1)
+{_logits, loss} = BigramLanguageModel.forward(predict_fn, params, xb, yb)
+loss
+```
+
+```elixir
+# And finally generate some text after the training…
+
+# Let's generate more token this time
+max_new_tokens = 500
+
+{_key, encoded_result} =
+  BigramLanguageModel.generate(predict_fn, params, idx, max_new_tokens, initial_pnrg_key)
+
+encoded_result
+# Convert our Nx.tensor to Elixir list
+|> Nx.to_list()
+# Decode the results
+|> Enum.map(fn encoded_list -> Minidecoder.decode(encoded_list) end)
+# We have only 1 batch, so just unplug the 1st item
+|> List.first()
+|> IO.puts()
 ```
