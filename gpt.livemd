@@ -447,31 +447,54 @@ defmodule BigramLanguageModel do
     )
   end
 
-  def generate(predict_fn, params, idx, max_new_tokens, pnrg_key) do
-    for _n <- 0..(max_new_tokens - 1), reduce: {pnrg_key, nil} do
-      {pnrg_key, acc} ->
-        # get the prediction
-        {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
+  def generate(predict_fn, params, idx, block_size, opts) do
+    opts = Keyword.validate!(opts, pnrg_key_seed: 1337, max_new_tokens: 1000)
 
-        # focus only on the last time step
-        # becomes {B, C}
-        logits = y_pred[[.., -1, ..]]
+    pnrg_key = opts[:pnrg_key_seed] |> Nx.Random.key()
+    max_new_tokens = opts[:max_new_tokens]
 
-        # apply softmax to get probabilities
-        # {B, C}
-        probs = Axon.Activations.softmax(logits)
+    Enum.reduce(1..max_new_tokens, {pnrg_key, idx}, fn _i, {pnrg_key, acc} ->
+      # It works, bit is a bit slower, see following comments
+      # {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
 
-        # sample from the distribution
-        # `{B, 1}`
-        {next_pnrg_key, idx_next} = RandomPlus.multinomial(pnrg_key, probs, num_samples: 1)
+      # NOTE: we need only last `block_size` chars at max to
+      # predict the next char, therefore let's cap the `acc`.
+      # Besides that passing at max `block_size` chars instead
+      # of the whole `acc` speeds up the prediction and returns the same 
+      # result (at least I think).
+      # (source https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd#generating-text-with-the-bigram-model-w-multinomial)
+      #
+      {_b, t} = Nx.shape(acc)
+      context_length = min(t, block_size)
+      context_range = -context_length..-1
+      context_slice = acc[[.., context_range]]
 
-        # {B, T + 1}
-        if acc != nil do
-          {next_pnrg_key, Nx.concatenate([acc, idx_next], axis: 1)}
-        else
-          {next_pnrg_key, Nx.concatenate([idx_next], axis: 1)}
-        end
-    end
+      # get the prediction
+      {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, context_slice)
+
+      # focus only on the last time step
+      # becomes {B, C}
+      logits = y_pred[[.., -1, ..]]
+
+      # apply softmax to get probabilities
+      # {B, C}
+      probs = Axon.Activations.softmax(logits)
+
+      # sample from the distribution
+      # `{B, 1}`
+      {next_pnrg_key, idx_next} = RandomPlus.multinomial(pnrg_key, probs, num_samples: 1)
+
+      # {B, T + 1}
+      {next_pnrg_key, Nx.concatenate([acc, idx_next], axis: 1)}
+    end)
+    # Keep only the generated text and discard they pnrg key
+    |> then(fn {_next_pnrg_key, acc} -> acc end)
+    # Convert our Nx.tensor to Elixir list
+    |> Nx.to_list()
+    # Decode the results
+    |> Enum.map(fn encoded_list -> Minidecoder.decode(encoded_list) end)
+    # We have only 1 batch, so just unplug the 1st item
+    |> List.first()
   end
 end
 ```
@@ -501,16 +524,9 @@ max_new_tokens = 100
 seed = 1337
 initial_pnrg_key = Nx.Random.key(seed)
 
-{_key, encoded_result} =
-  BigramLanguageModel.generate(predict_fn, initial_params, idx, max_new_tokens, initial_pnrg_key)
-
-encoded_result
-# Convert our Nx.tensor to Elixir list
-|> Nx.to_list()
-# Decode the results
-|> Enum.map(fn encoded_list -> Minidecoder.decode(encoded_list) end)
-# We have only 1 batch, so just unplug the 1st item
-|> List.first()
+BigramLanguageModel.generate(predict_fn, initial_params, idx, block_size,
+  max_new_tokens: max_new_tokens
+)
 |> IO.puts()
 ```
 
@@ -616,7 +632,7 @@ Enum.take(streamed_batches, 2)
 batch_size = 32
 block_size = 8
 # increase number of steps for good results...
-iterations = 1000
+iterations = 100
 
 model = BigramLanguageModel.init(vocab_size)
 lr = 1.0e-3
@@ -629,7 +645,7 @@ params =
   |> Axon.Loop.run(streamed_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
 ```
 
-_(side note: i feel that training loop is a bit slow, but I should verify how long it takes the python implementation. With my notebook (macbook pro i7) it takes 60 seconds for 1000 iterations.)_
+_(side note: i feel that training loop is a bit slow, but I should verify how long it takes the python implementation. With my notebook (macbook pro intel i7) it takes 6 seconds ca. for 100 iterations.)_
 
 ```elixir
 # And check the loss with the params after # iterations of training loop
@@ -645,15 +661,29 @@ loss
 # Let's generate more token this time
 max_new_tokens = 500
 
-{_key, encoded_result} =
-  BigramLanguageModel.generate(predict_fn, params, idx, max_new_tokens, initial_pnrg_key)
+BigramLanguageModel.generate(predict_fn, params, idx, block_size, max_new_tokens: max_new_tokens)
+|> IO.puts()
+```
 
-encoded_result
-# Convert our Nx.tensor to Elixir list
-|> Nx.to_list()
-# Decode the results
-|> Enum.map(fn encoded_list -> Minidecoder.decode(encoded_list) end)
-# We have only 1 batch, so just unplug the 1st item
-|> List.first()
+```elixir
+# For simplicity I let the model train for 10_000 iterations and dump the
+# params in a file. Let's load it and see how the text generations looks like…
+
+params10000 =
+  __DIR__
+  |> Path.join("bigram_model_params_10000")
+  |> Path.expand()
+  |> File.read!()
+  |> Nx.deserialize()
+
+[{xb, yb}] = get_streamed_batch.(:train, batch_size, block_size) |> Enum.take(1)
+{_logits, loss} = BigramLanguageModel.forward(predict_fn, params10000, xb, yb)
+IO.inspect(loss, label: "Loss after 10_000 iterations")
+
+max_new_tokens = 500
+
+BigramLanguageModel.generate(predict_fn, params10000, idx, block_size,
+  max_new_tokens: max_new_tokens
+)
 |> IO.puts()
 ```
