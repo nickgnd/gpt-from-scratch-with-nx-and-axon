@@ -14,6 +14,8 @@ Mix.install(
 
 ## Intro
 
+TODO: add better intro…
+
 Resources:
 
 * https://www.youtube.com/watch?v=kCc8FmEb1nY
@@ -447,30 +449,15 @@ defmodule BigramLanguageModel do
     )
   end
 
-  def generate(predict_fn, params, idx, block_size, opts) do
+  def generate(predict_fn, params, idx, opts) do
     opts = Keyword.validate!(opts, pnrg_key_seed: 1337, max_new_tokens: 1000)
 
     pnrg_key = opts[:pnrg_key_seed] |> Nx.Random.key()
     max_new_tokens = opts[:max_new_tokens]
 
     Enum.reduce(1..max_new_tokens, {pnrg_key, idx}, fn _i, {pnrg_key, acc} ->
-      # It works, bit is a bit slower, see following comments
-      # {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
-
-      # NOTE: we need only last `block_size` chars at max to
-      # predict the next char, therefore let's cap the `acc`.
-      # Besides that passing at max `block_size` chars instead
-      # of the whole `acc` speeds up the prediction and returns the same 
-      # result (at least I think).
-      # (source https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd#generating-text-with-the-bigram-model-w-multinomial)
-      #
-      {_b, t} = Nx.shape(acc)
-      context_length = min(t, block_size)
-      context_range = -context_length..-1
-      context_slice = acc[[.., context_range]]
-
       # get the prediction
-      {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, context_slice)
+      {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
 
       # focus only on the last time step
       # becomes {B, C}
@@ -524,9 +511,7 @@ max_new_tokens = 100
 seed = 1337
 initial_pnrg_key = Nx.Random.key(seed)
 
-BigramLanguageModel.generate(predict_fn, initial_params, idx, block_size,
-  max_new_tokens: max_new_tokens
-)
+BigramLanguageModel.generate(predict_fn, initial_params, idx, max_new_tokens: max_new_tokens)
 |> IO.puts()
 ```
 
@@ -661,7 +646,7 @@ loss
 # Let's generate more token this time
 max_new_tokens = 500
 
-BigramLanguageModel.generate(predict_fn, params, idx, block_size, max_new_tokens: max_new_tokens)
+BigramLanguageModel.generate(predict_fn, params, idx, max_new_tokens: max_new_tokens)
 |> IO.puts()
 ```
 
@@ -682,8 +667,6 @@ IO.inspect(loss, label: "Loss after 10_000 iterations")
 
 max_new_tokens = 500
 
-BigramLanguageModel.generate(predict_fn, params10000, idx, block_size,
-  max_new_tokens: max_new_tokens
-)
+BigramLanguageModel.generate(predict_fn, params10000, idx, max_new_tokens: max_new_tokens)
 |> IO.puts()
 ```
