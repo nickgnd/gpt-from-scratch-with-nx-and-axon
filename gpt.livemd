@@ -572,11 +572,60 @@ model
 |> Axon.Loop.run(train_batches, %{}, epochs: 1, iterations: iterations, compiler: EXLA)
 ```
 
-👆 The batch generation is rather slow, it takes 200 seconds to generate 500 batches. Let's try to speed it up by making it lazy 💤 and infinite.
+👆 The batch generation is rather slow, it takes 200 seconds to generate 500 batches.
+Let's try to speed it up by making it lazy (via strema) 💤 and generate the batch in a numerical function.
 
-_(Again, kudos to [@wdetw](https://github.com/wtedw) for the idea https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd 👏)_
+Highly inspired by:
+
+* [@wdetw](https://github.com/wtedw) for the stream idea https://github.com/wtedw/gpt-from-scratch/blob/main/gpt-dev.livemd 👏)
+* [@polvalente](https://twitter.com/polvalente) for the numerical function https://elixirforum.com/t/lets-build-gpt-with-nx-how-to-translate-this-code-in-elixir/56143/7
 
 ```elixir
+defmodule DataLoader do
+  import Nx.Defn
+
+  defn get_batch(data, key, opts \\ []) do
+    opts = keyword!(opts, [:batch_size, :block_size])
+
+    block_size = opts[:block_size]
+    batch_size = opts[:batch_size]
+
+    {n} = Nx.shape(data)
+
+    # Generate a `{batch_size, 1}` tensor of random numbers between
+    # `0` and `n - block_size`, they represent the start index for every
+    # block that composes the batch.
+    # NOTE: set `type: :u32` to avoid negative values.
+    {ix, key} = Nx.Random.randint(key, 0, n - block_size, shape: {batch_size, 1}, type: :u32)
+
+    # For each number, generate a sequence by summing
+    # a tensor `{1, block_size}`
+    # For example, if `block_size` is 8,
+    # `Nx.iota({1, 8})` will return:
+    #
+    # ```
+    # [
+    #   [0, 1, 2, 3, 4, 5, 6, 7]
+    # ]
+    # ```
+    #
+    # And `ix +  Nx.iota({1, block_size})` will return
+    # a new tensor `{batch_size, block_size}` because
+    # the addition will broadcast tensors whenever the
+    # dimensions do not match and broadcasting is possible.
+    # https://hexdocs.pm/nx/Nx.html#add/2
+    x_indices = ix + Nx.iota({1, block_size})
+
+    x = Nx.take(data, x_indices)
+
+    # Shift by 1 for `y` tensor to
+    # get the following char.
+    y = Nx.take(data, x_indices + 1)
+
+    {x, y, key}
+  end
+end
+
 seed = 1337
 
 get_streamed_batch = fn split, batch_size, block_size ->
@@ -585,18 +634,8 @@ get_streamed_batch = fn split, batch_size, block_size ->
     fn pnrg_key ->
       data = if split == :train, do: train_data, else: val_data
 
-      {ix, new_pnrg_key} =
-        Nx.Random.randint(
-          pnrg_key,
-          0,
-          Nx.size(data) - block_size,
-          shape: {batch_size},
-          type: :u32
-        )
-
-      ix = Nx.to_list(ix)
-      xb = Enum.map(ix, fn i -> Nx.slice(data, [i], [block_size]) end) |> Nx.stack()
-      yb = Enum.map(ix, fn i -> Nx.slice(data, [i + 1], [block_size]) end) |> Nx.stack()
+      {xb, yb, new_pnrg_key} =
+        DataLoader.get_batch(data, pnrg_key, block_size: block_size, batch_size: batch_size)
 
       {[{xb, yb}], new_pnrg_key}
     end,
