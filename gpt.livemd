@@ -457,7 +457,7 @@ defmodule BigramLanguageModel do
 
     Enum.reduce(1..max_new_tokens, {pnrg_key, idx}, fn _i, {pnrg_key, acc} ->
       # get the prediction
-      {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, idx)
+      {y_pred, _loss} = BigramLanguageModel.forward(predict_fn, params, acc)
 
       # focus only on the last time step
       # becomes {B, C}
