@@ -3,7 +3,12 @@
 ```elixir
 Mix.install(
   [
-    {:nx, "~> 0.5.3"},
+    # Take advantage of last changes not yet released:
+    {:nx,
+     github: "elixir-nx/nx",
+     sparse: "nx",
+     ref: "8dbeaa8fc2d23d3e900707b8c43b7a9f0b73cb2a",
+     override: true},
     {:axon, "~> 0.5"},
     {:exla, "~> 0.5.1"},
     {:kino, "~> 0.7.0"}
@@ -595,8 +600,7 @@ defmodule DataLoader do
     # Generate a `{batch_size, 1}` tensor of random numbers between
     # `0` and `n - block_size`, they represent the start index for every
     # block that composes the batch.
-    # NOTE: set `type: :u32` to avoid negative values.
-    {ix, key} = Nx.Random.randint(key, 0, n - block_size, shape: {batch_size, 1}, type: :u32)
+    {ix, key} = Nx.Random.randint(key, 0, n - block_size, shape: {batch_size, 1})
 
     # For each number, generate a sequence by summing
     # a tensor `{1, block_size}`
