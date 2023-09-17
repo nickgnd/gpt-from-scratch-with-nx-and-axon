@@ -713,3 +713,61 @@ max_new_tokens = 500
 BigramLanguageModel.generate(predict_fn, params10000, idx, max_new_tokens: max_new_tokens)
 |> IO.puts()
 ```
+
+## The mathematical trick in self-attention
+
+```elixir
+# consider the following toy example
+
+# batch, time, channel
+# `channel` encodes "some" information at each point in the sequence
+{b, t, c} = {4, 8, 2}
+
+{x, key} = Nx.Random.normal(Nx.Random.key(1337), shape: {b, t, c})
+```
+
+We would like this tokens (up to 8 tokens in a batch) and we would like to couple them and let them communicates in a very specific way: information shuold flow from previous context to the current timestamp and we can not have any information from the future because we are trying to predict them.
+The simplest way to make the token communicate is to do an average of all the preceeding elements: is a lossy way to make token communication but that's ok for the moment.
+
+```elixir
+# xbow - bag of words is a term used to identify that we are averaging up things
+
+# Let's initialize to zeroes
+xbow = Nx.broadcast(Nx.tensor(0), {b, t, c})
+
+# We want x[b, t] = mean_{i<=t} x[b, i]
+xbow =
+  for b_i <- 0..(b - 1), reduce: xbow do
+    xbow ->
+      for t_i <- 0..(t - 1), reduce: xbow do
+        xbow ->
+          # Shape `{t^, c}` where `t^` is how many elements there were in the past
+          # (remember, range is inclusive in Elixir)
+          xprev = x[[b_i, 0..t_i]]
+
+          mean = Nx.mean(xprev, axes: [0])
+
+          # `xbow` has rank 3, while `mean` has rank 1.
+          # In order to inject the computed `mean` in `xbow` tensor
+          # via `Nx.put_slice/3` we need to make them compatible,
+          # aka, update `mean` tensor to have the same rank.
+          wrapped_mean = Nx.reshape(mean, {1, 1, :auto})
+          Nx.put_slice(xbow, [b_i, t_i, 0], wrapped_mean)
+      end
+  end
+```
+
+Let's take a look at the result below...
+
+```elixir
+IO.inspect(x[0], label: "x[0]\n")
+IO.inspect(xbow[0], label: "xbow[0]\n")
+
+# Let's "manually" compute the average of the first 2 elements of x (along axis 0)
+avg = (Nx.to_number(x[0][0][0]) + Nx.to_number(x[0][1][0])) / 2
+
+# This should be the same of the 2nd element in xbow (along axis 0)
+IO.inspect("AVG: #{avg} ~= xbow[0][1][0]: #{Nx.to_number(xbow[0][1][0])}")
+
+:ok
+```
