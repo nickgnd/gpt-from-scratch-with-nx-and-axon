@@ -3,12 +3,7 @@
 ```elixir
 Mix.install(
   [
-    # Take advantage of last changes not yet released:
-    {:nx,
-     github: "elixir-nx/nx",
-     sparse: "nx",
-     ref: "8dbeaa8fc2d23d3e900707b8c43b7a9f0b73cb2a",
-     override: true},
+    {:nx, "~> 0.6", override: true},
     {:axon, "~> 0.5"},
     {:exla, "~> 0.5.1"},
     {:kino, "~> 0.7.0"}
@@ -714,7 +709,7 @@ BigramLanguageModel.generate(predict_fn, params10000, idx, max_new_tokens: max_n
 |> IO.puts()
 ```
 
-## The mathematical trick in self-attention
+## The mathematical trick in self-attention (version 1)
 
 ```elixir
 # consider the following toy example
@@ -723,7 +718,7 @@ BigramLanguageModel.generate(predict_fn, params10000, idx, max_new_tokens: max_n
 # `channel` encodes "some" information at each point in the sequence
 {b, t, c} = {4, 8, 2}
 
-{x, key} = Nx.Random.normal(Nx.Random.key(1337), shape: {b, t, c})
+{x, _key} = Nx.Random.normal(Nx.Random.key(1337), shape: {b, t, c})
 ```
 
 We would like this tokens (up to 8 tokens in a batch) and we would like to couple them and let them communicates in a very specific way: information shuold flow from previous context to the current timestamp and we can not have any information from the future because we are trying to predict them.
@@ -757,12 +752,17 @@ xbow =
   end
 ```
 
-Let's take a look at the result below...
+Let's take a look at the result:
 
 ```elixir
-IO.inspect(x[0], label: "x[0]\n")
-IO.inspect(xbow[0], label: "xbow[0]\n")
+x[0]
+```
 
+```elixir
+xbow[0]
+```
+
+```elixir
 # Let's "manually" compute the average of the first 2 elements of x (along axis 0)
 avg = (Nx.to_number(x[0][0][0]) + Nx.to_number(x[0][1][0])) / 2
 
@@ -770,4 +770,135 @@ avg = (Nx.to_number(x[0][0][0]) + Nx.to_number(x[0][1][0])) / 2
 IO.inspect("AVG: #{avg} ~= xbow[0][1][0]: #{Nx.to_number(xbow[0][1][0])}")
 
 :ok
+```
+
+## The mathematical trick in self-attention (version 2)
+
+The previous implementation (version 1) is very inefficient. We can be more efficient by using batch matrix multiply in combination with the `Nx.tril` function to do this weighted aggregation. And the weights are specified in this `{t, t}` tensor (`wei`), and we are basically doing weighted sums according to the triangular form of the `wei` tensor, so that means that a token at the nth position will only get the information from the preeciding tokens.
+
+```elixir
+# Example to see how bath matrix multiply works
+# - the tensor `a` is renamed `t1`
+# - the tensor `b` is renamed `t2`
+# - the tensor `c` is renamed `t3`
+t1 = Nx.broadcast(1.0, {3, 3}) |> Nx.tril()
+t1 = Nx.divide(t1, Nx.sum(t1, axes: [1], keep_axes: true))
+{t2, _key} = Nx.Random.randint(Nx.Random.key(123), 1, 10, shape: {3, 2})
+t2 = Nx.as_type(t2, :f32)
+t3 = Nx.dot(t1, t2)
+
+IO.inspect(t1, label: "t1 (a)")
+IO.inspect(t2, label: "t2 (b)")
+IO.inspect(t3, label: "t3 (c)")
+
+:ok
+```
+
+```elixir
+wei = Nx.broadcast(1.0, {t, t}) |> Nx.tril()
+wei = Nx.divide(wei, Nx.sum(wei, axes: [1], keep_axes: true))
+
+# NOTE:
+# We can not simply do `Nx.dot(wei, x)` as in pytorch
+# because in this case `Nx.dot/2` does not automatically broadcast
+# `wei` across batch dimension `b` of `x` tensor.
+#
+# Therefore, what we can do is to add the batch dimension
+# to our `wei`, from `{t, t}` to `{b, t, t}` by broadcasting it,
+# basically it copies the `{t, t}` weights tensor for each batch.
+wei = Nx.broadcast(wei, {b, t, t})
+
+# Given that `wei` is `{b, t, t}` and `x` is `{b, t, c}`,
+# and that we want the returned tensor to have the same shape of `x`,
+# we need to specify the contracting and batch axes
+# https://hexdocs.pm/nx/Nx.html#dot/6-dot-product-between-two-batched-tensors
+xbow2 = Nx.dot(wei, [2], [0], x, [1], [0])
+
+# Let's check if the result is the same of the
+# one obtained before (1 means true)
+Nx.all_close(xbow, xbow2)
+```
+
+```elixir
+# Let's manually compare the 1st batch of `xbow` and `xbow2`
+IO.inspect(xbow[0], label: "xbow[0]")
+IO.inspect(xbow2[0], label: "xbow2[0]")
+
+:ok
+```
+
+#### Alternative approach using vectorization
+
+Given that we want to do the dot product along the batch dimension `b`, we can take advantage of `Nx.vectorize`
+
+* https://hexdocs.pm/nx/vectorization.html
+* https://elixirforum.com/t/understanding-nx-dot-6-contracting-and-batch-axes/58407/2?u=nickgnd
+
+```elixir
+wei = Nx.broadcast(1.0, {t, t}) |> Nx.tril()
+wei = Nx.divide(wei, Nx.sum(wei, axes: [1], keep_axes: true))
+
+# Here the magic… no need to specify contracting and batch axes anymore
+# when computing the matrix multiplication.
+vec_x = Nx.vectorize(x, :batch)
+xbow2_vect = Nx.dot(wei, vec_x)
+IO.inspect(xbow2_vect)
+
+# Let's check if the result is the same of the
+# one obtained before (1 means true)
+Nx.all_close(xbow, Nx.devectorize(xbow2_vect, keep_names: false))
+```
+
+## The mathematical trick in self-attention (version 3)
+
+Use Softmax to normalize the weights tensor.
+
+```elixir
+# The weights are initialized to 0.0 and we can think of it
+# like an interaction strength or affinity, so basically is telling
+# us how much from the past token we want to aggregate and average up.
+# The weights value is going to change and be data dependent: the tokens will start
+# to "look" at each other and find other tokens more or less interesting,
+# that's the _affinity_.
+wei = Nx.broadcast(0.0, {t, t})
+
+tril = Nx.broadcast(1.0, {t, t}) |> Nx.tril()
+
+# In particular, this line is telling us that tokens from the past
+# cannot communicate with neg. infinity tokens, basically the
+# neg. infinity tokens won't be aggregated
+wei = Nx.select(Nx.equal(tril, 0.0), Nx.Constants.neg_infinity(), wei)
+IO.inspect(wei, label: "Initial weights")
+
+# Equivalent result by using `Nx.triu/2`
+# wei = Nx.broadcast(Nx.Constants.neg_infinity(), {t, t}) |> Nx.triu(k: 1)
+
+# Normalize
+wei = Axon.Activations.softmax(wei)
+IO.inspect(wei, label: "Weights after softmax")
+
+# Aggregation by matrix multiplication `wei @ x`.
+# It aggregates their values depending on the affinity
+# between tokens.
+#
+# NOTE:
+# We can not simply do `Nx.dot(wei, x)` as in pytorch
+# because in this case `Nx.dot/2` does not automatically broadcast
+# `wei` across batch dimension `b` of `x` tensor.
+#
+# Therefore, what we can do is to add the batch dimension
+# to our `wei`, from `{t, t}` to `{b, t, t}` by broadcasting it,
+# basically it copies the `{t, t}` weights tensor for each batch.
+wei = Nx.broadcast(wei, {b, t, t})
+
+# Given that `wei` is `{b, t, t}` and `x` is `{b, t, c}`,
+# and that we want the returned tensor to have the same shape of `x`,
+# we need to specify the contracting and batch axes
+# https://hexdocs.pm/nx/Nx.html#dot/6-dot-product-between-two-batched-tensors
+xbow3 = Nx.dot(wei, [2], [0], x, [1], [0])
+IO.inspect(xbow3, label: "xbow3")
+
+# Let's check if the result is the same of the
+# one obtained before (1 means true)
+Nx.all_close(xbow, xbow3)
 ```
